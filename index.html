@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consulta de Preço - Sol Materiais</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f4f4f4; color: #222; }
+  header { background: #f5a300; color: #fff; padding: 16px; text-align: center; font-size: 20px; font-weight: bold; }
+  main { max-width: 520px; margin: 0 auto; padding: 16px; }
+  .busca { display: flex; gap: 8px; }
+  input { flex: 1; font-size: 20px; padding: 12px; border: 2px solid #ccc; border-radius: 8px; }
+  input:focus { border-color: #f5a300; outline: none; }
+  button { font-size: 16px; padding: 12px 16px; border: 0; border-radius: 8px; background: #222; color: #fff; cursor: pointer; }
+  #btnCamera { width: 100%; margin-top: 10px; background: #f5a300; }
+  #reader { margin-top: 12px; }
+  .card { background: #fff; border-radius: 12px; padding: 20px; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .desc { font-size: 20px; font-weight: 600; }
+  .cod { color: #777; font-size: 14px; margin-top: 4px; }
+  .preco { font-size: 44px; font-weight: bold; color: #1a7f37; margin: 16px 0 4px; }
+  .estoque { font-size: 16px; color: #444; }
+  .erro { color: #c62828; font-weight: 600; }
+  .info { color: #777; text-align: center; }
+</style>
+</head>
+<body>
+<header>Consulta de Preço</header>
+<main>
+  <div class="busca">
+    <input id="ean" type="text" inputmode="numeric" placeholder="Bipe ou digite o código" autofocus>
+    <button id="btnBuscar">OK</button>
+  </div>
+  <button id="btnCamera">📷 Ler com a câmera</button>
+  <div id="reader"></div>
+  <div id="resultado" class="card info">Aguardando leitura...</div>
+</main>
+
+<script>
+  const API = 'https://autowebhook.saymon.space/webhook/api/preco';
+  const campo = document.getElementById('ean');
+  const resultado = document.getElementById('resultado');
+  let scanner = null;
+
+  const brl = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const pega = (o, k) => o[k] ?? o[k.toUpperCase()];
+
+  async function consultar(codigo) {
+    codigo = String(codigo).trim();
+    if (!/^\d{8,14}$/.test(codigo)) {
+      resultado.className = 'card erro';
+      resultado.textContent = 'Código inválido.';
+      return;
+    }
+    resultado.className = 'card info';
+    resultado.textContent = 'Consultando...';
+    try {
+      const r = await fetch(API + '?ean=' + codigo);
+      let d = await r.json();
+      if (Array.isArray(d)) d = d[0] || {};
+      if (!r.ok || d.erro || !pega(d, 'descricao')) {
+        resultado.className = 'card erro';
+        resultado.textContent = d.erro || 'Produto não encontrado.';
+        return;
+      }
+      resultado.className = 'card';
+      resultado.innerHTML = `
+        <div class="desc">${pega(d, 'descricao')}</div>
+        <div class="cod">Cód. ${pega(d, 'codprod') ?? ''} · EAN ${codigo}</div>
+        <div class="preco">${brl(pega(d, 'pvenda') ?? pega(d, 'preco'))}</div>
+        <div class="estoque">Estoque: ${pega(d, 'disponivel') ?? pega(d, 'estoque') ?? '-'} ${pega(d, 'unidade') ?? ''}</div>`;
+    } catch (e) {
+      resultado.className = 'card erro';
+      resultado.textContent = 'Erro ao consultar. Tente novamente.';
+    } finally {
+      campo.value = '';
+      campo.focus();
+    }
+  }
+
+  document.getElementById('btnBuscar').onclick = () => consultar(campo.value);
+  campo.addEventListener('keydown', e => { if (e.key === 'Enter') consultar(campo.value); });
+
+  document.getElementById('btnCamera').onclick = async () => {
+    if (scanner) { await scanner.stop(); scanner = null; return; }
+    scanner = new Html5Qrcode('reader');
+    try {
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 280, height: 120 } },
+        async texto => { await scanner.stop(); scanner = null; consultar(texto); }
+      );
+    } catch (e) {
+      scanner = null;
+      resultado.className = 'card erro';
+      resultado.textContent = 'Não foi possível abrir a câmera.';
+    }
+  };
+</script>
+</body>
+</html>
