@@ -41,10 +41,21 @@
   const API = 'https://autowebhook.saymon.space/webhook/api/preco';
   const campo = document.getElementById('ean');
   const resultado = document.getElementById('resultado');
+  const btnCamera = document.getElementById('btnCamera');
   let scanner = null;
+  let ultimaLeitura = null;
 
   const brl = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const pega = (o, k) => o[k] ?? o[k.toUpperCase()];
+
+  // Valida dígito verificador de EAN-8, UPC-A e EAN-13
+  const eanValido = c => {
+    if (!/^\d{8}$|^\d{12,13}$/.test(c)) return false;
+    const d = c.split('').map(Number);
+    const dv = d.pop();
+    const soma = d.reverse().reduce((s, n, i) => s + n * (i % 2 === 0 ? 3 : 1), 0);
+    return (10 - (soma % 10)) % 10 === dv;
+  };
 
   async function consultar(codigo) {
     codigo = String(codigo).trim();
@@ -61,14 +72,15 @@
       if (Array.isArray(d)) d = d[0] || {};
       if (!r.ok || d.erro || !pega(d, 'descricao')) {
         resultado.className = 'card erro';
-        resultado.textContent = d.erro || 'Produto não encontrado.';
+        resultado.textContent = (d.erro || 'Produto não encontrado.') + ' (' + codigo + ')';
         return;
       }
+      const marca = pega(d, 'marca');
       resultado.className = 'card';
       resultado.innerHTML = `
         <div class="desc">${pega(d, 'descricao')}</div>
-        <div class="cod">Cód. ${pega(d, 'codprod') ?? ''} · EAN ${codigo}</div>
-        <div class="preco">${brl(pega(d, 'pvenda') ?? pega(d, 'preco'))}</div>
+        <div class="cod">${marca ? marca + ' · ' : ''}Cód. ${pega(d, 'codprod') ?? ''} · EAN ${codigo}</div>
+        <div class="preco">${brl(pega(d, 'preco') ?? pega(d, 'pvenda'))}</div>
         <div class="estoque">Estoque: ${pega(d, 'disponivel') ?? pega(d, 'estoque') ?? '-'} ${pega(d, 'unidade') ?? ''}</div>`;
     } catch (e) {
       resultado.className = 'card erro';
@@ -79,18 +91,43 @@
     }
   }
 
+  async function pararCamera() {
+    if (scanner) {
+      try { await scanner.stop(); } catch (e) {}
+      scanner = null;
+    }
+    btnCamera.textContent = '📷 Ler com a câmera';
+  }
+
   document.getElementById('btnBuscar').onclick = () => consultar(campo.value);
   campo.addEventListener('keydown', e => { if (e.key === 'Enter') consultar(campo.value); });
 
-  document.getElementById('btnCamera').onclick = async () => {
-    if (scanner) { await scanner.stop(); scanner = null; return; }
-    scanner = new Html5Qrcode('reader');
+  btnCamera.onclick = async () => {
+    if (scanner) { await pararCamera(); return; }
+    ultimaLeitura = null;
+    scanner = new Html5Qrcode('reader', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A
+      ],
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false
+    });
     try {
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 280, height: 120 } },
-        async texto => { await scanner.stop(); scanner = null; consultar(texto); }
+        { fps: 15, qrbox: { width: 300, height: 120 }, aspectRatio: 1.777 },
+        async texto => {
+          if (!eanValido(texto)) return;
+          // Só aceita se ler o mesmo código duas vezes seguidas
+          if (texto !== ultimaLeitura) { ultimaLeitura = texto; return; }
+          await pararCamera();
+          if (navigator.vibrate) navigator.vibrate(100);
+          consultar(texto);
+        }
       );
+      btnCamera.textContent = '✖ Fechar câmera';
     } catch (e) {
       scanner = null;
       resultado.className = 'card erro';
