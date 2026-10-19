@@ -9,9 +9,9 @@
   * { box-sizing: border-box; }
   body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f4f4f4; color: #222; }
   header { background: #f5a300; color: #fff; padding: 16px; text-align: center; font-size: 20px; font-weight: bold; }
-  main { max-width: 520px; margin: 0 auto; padding: 16px; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
   .busca { display: flex; gap: 8px; }
-  input { flex: 1; font-size: 20px; padding: 12px; border: 2px solid #ccc; border-radius: 8px; }
+  input { flex: 1; min-width: 0; font-size: 18px; padding: 12px; border: 2px solid #ccc; border-radius: 8px; }
   input:focus { border-color: #f5a300; outline: none; }
   button { font-size: 16px; padding: 12px 16px; border: 0; border-radius: 8px; background: #222; color: #fff; cursor: pointer; }
   #btnCamera { width: 100%; margin-top: 10px; background: #f5a300; }
@@ -19,8 +19,21 @@
   .card { background: #fff; border-radius: 12px; padding: 20px; margin-top: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
   .desc { font-size: 20px; font-weight: 600; }
   .cod { color: #777; font-size: 14px; margin-top: 4px; }
-  .preco { font-size: 44px; font-weight: bold; color: #1a7f37; margin: 16px 0 4px; }
-  .estoque { font-size: 16px; color: #444; }
+  .preco { font-size: 44px; font-weight: bold; color: #1a7f37; margin: 16px 0 12px; }
+  .estoque { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .estoque div { background: #f4f4f4; border-radius: 8px; padding: 10px; text-align: center; }
+  .estoque span { display: block; font-size: 12px; color: #777; }
+  .estoque b { font-size: 20px; }
+  .estoque .zero b { color: #c62828; }
+  .item { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left;
+          background: #fff; color: #222; padding: 14px; border-bottom: 1px solid #eee; border-radius: 0; }
+  .item:last-child { border-bottom: 0; }
+  .item .nome { font-weight: 600; font-size: 15px; }
+  .item .sub { color: #777; font-size: 13px; margin-top: 2px; }
+  .item .valor { font-weight: bold; color: #1a7f37; white-space: nowrap; }
+  .lista { padding: 0; overflow: hidden; }
+  .aviso { padding: 12px 14px; font-size: 13px; color: #777; background: #fafafa; }
+  .voltar { background: transparent; color: #f5a300; padding: 0; margin-bottom: 12px; font-weight: 600; }
   .erro { color: #c62828; font-weight: 600; }
   .info { color: #777; text-align: center; }
 </style>
@@ -29,24 +42,92 @@
 <header>Consulta de Preço</header>
 <main>
   <div class="busca">
-    <input id="ean" type="text" inputmode="numeric" placeholder="Bipe ou digite o código" autofocus>
+    <input id="busca" type="search" placeholder="Código, referência, EAN ou descrição" autofocus autocomplete="off">
     <button id="btnBuscar">OK</button>
   </div>
   <button id="btnCamera">📷 Ler com a câmera</button>
   <div id="reader"></div>
-  <div id="resultado" class="card info">Aguardando leitura...</div>
+  <div id="resultado" class="card info">Bipe, digite o código ou pesquise pela descrição.</div>
 </main>
 
 <script>
   const API = 'https://autowebhook.saymon.space/webhook/api/preco';
-  const campo = document.getElementById('ean');
+  const LIMITE = 20;
+  const campo = document.getElementById('busca');
   const resultado = document.getElementById('resultado');
   const btnCamera = document.getElementById('btnCamera');
   let scanner = null;
   let ultimaLeitura = null;
+  let lista = [];
+  let termoAtual = '';
 
   const brl = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const num = v => Number(v ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   const pega = (o, k) => o[k] ?? o[k.toUpperCase()];
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  function mensagem(texto, classe) {
+    resultado.className = 'card ' + classe;
+    resultado.textContent = texto;
+  }
+
+  async function consultar(termo) {
+    termo = String(termo).trim();
+    if (termo.length < 2) { mensagem('Digite ao menos 2 caracteres.', 'erro'); return; }
+    termoAtual = termo;
+    mensagem('Consultando...', 'info');
+    try {
+      const r = await fetch(API + '?q=' + encodeURIComponent(termo));
+      let d = await r.json();
+      if (!Array.isArray(d)) d = [d];
+      if (!r.ok || d[0]?.erro) { mensagem(d[0]?.erro || 'Erro na consulta.', 'erro'); return; }
+      lista = d.filter(x => pega(x, 'descricao'));
+      if (!lista.length) mensagem('Nada encontrado para "' + termo + '".', 'erro');
+      else if (lista.length === 1) detalhe(0);
+      else mostrarLista();
+    } catch (e) {
+      mensagem('Erro ao consultar. Tente novamente.', 'erro');
+    } finally {
+      campo.select();
+    }
+  }
+
+  function mostrarLista() {
+    resultado.className = 'card lista';
+    resultado.innerHTML = lista.map((p, i) => `
+      <button class="item" onclick="detalhe(${i})">
+        <div>
+          <div class="nome">${esc(pega(p, 'descricao'))}</div>
+          <div class="sub">${pega(p, 'marca') ? esc(pega(p, 'marca')) + ' · ' : ''}Cód. ${esc(pega(p, 'codprod'))}</div>
+        </div>
+        <div class="valor">${brl(pega(p, 'preco'))}</div>
+      </button>`).join('') +
+      (lista.length >= LIMITE
+        ? `<div class="aviso">Mostrando os ${LIMITE} primeiros. Refine a busca para encontrar mais rápido.</div>`
+        : '');
+  }
+
+  function detalhe(i) {
+    const p = lista[i];
+    const est = (nome, chave) => {
+      const v = Number(pega(p, chave) ?? 0);
+      return `<div class="${v <= 0 ? 'zero' : ''}"><span>${nome}</span><b>${num(v)}</b></div>`;
+    };
+    const ref = pega(p, 'codfab');
+    resultado.className = 'card';
+    resultado.innerHTML = `
+      ${lista.length > 1 ? '<button class="voltar" onclick="mostrarLista()">← Voltar à lista</button>' : ''}
+      <div class="desc">${esc(pega(p, 'descricao'))}</div>
+      <div class="cod">
+        ${pega(p, 'marca') ? esc(pega(p, 'marca')) + ' · ' : ''}Cód. ${esc(pega(p, 'codprod'))}${ref ? ' · Ref. ' + esc(ref) : ''}
+      </div>
+      <div class="preco">${brl(pega(p, 'preco'))} <small style="font-size:16px;color:#777">/ ${esc(pega(p, 'unidade'))}</small></div>
+      <div class="estoque">
+        ${est('Matriz', 'est_matriz')}
+        ${est('Filial CJ', 'est_cj')}
+        ${est('Filial Canaã', 'est_canaa')}
+      </div>`;
+  }
 
   // Valida dígito verificador de EAN-8, UPC-A e EAN-13
   const eanValido = c => {
@@ -56,40 +137,6 @@
     const soma = d.reverse().reduce((s, n, i) => s + n * (i % 2 === 0 ? 3 : 1), 0);
     return (10 - (soma % 10)) % 10 === dv;
   };
-
-  async function consultar(codigo) {
-    codigo = String(codigo).trim();
-    if (!/^\d{8,14}$/.test(codigo)) {
-      resultado.className = 'card erro';
-      resultado.textContent = 'Código inválido.';
-      return;
-    }
-    resultado.className = 'card info';
-    resultado.textContent = 'Consultando...';
-    try {
-      const r = await fetch(API + '?ean=' + codigo);
-      let d = await r.json();
-      if (Array.isArray(d)) d = d[0] || {};
-      if (!r.ok || d.erro || !pega(d, 'descricao')) {
-        resultado.className = 'card erro';
-        resultado.textContent = (d.erro || 'Produto não encontrado.') + ' (' + codigo + ')';
-        return;
-      }
-      const marca = pega(d, 'marca');
-      resultado.className = 'card';
-      resultado.innerHTML = `
-        <div class="desc">${pega(d, 'descricao')}</div>
-        <div class="cod">${marca ? marca + ' · ' : ''}Cód. ${pega(d, 'codprod') ?? ''} · EAN ${codigo}</div>
-        <div class="preco">${brl(pega(d, 'preco') ?? pega(d, 'pvenda'))}</div>
-        <div class="estoque">Estoque: ${pega(d, 'disponivel') ?? pega(d, 'estoque') ?? '-'} ${pega(d, 'unidade') ?? ''}</div>`;
-    } catch (e) {
-      resultado.className = 'card erro';
-      resultado.textContent = 'Erro ao consultar. Tente novamente.';
-    } finally {
-      campo.value = '';
-      campo.focus();
-    }
-  }
 
   async function pararCamera() {
     if (scanner) {
@@ -120,18 +167,17 @@
         { fps: 15, qrbox: { width: 300, height: 120 }, aspectRatio: 1.777 },
         async texto => {
           if (!eanValido(texto)) return;
-          // Só aceita se ler o mesmo código duas vezes seguidas
           if (texto !== ultimaLeitura) { ultimaLeitura = texto; return; }
           await pararCamera();
           if (navigator.vibrate) navigator.vibrate(100);
+          campo.value = texto;
           consultar(texto);
         }
       );
       btnCamera.textContent = '✖ Fechar câmera';
     } catch (e) {
       scanner = null;
-      resultado.className = 'card erro';
-      resultado.textContent = 'Não foi possível abrir a câmera.';
+      mensagem('Não foi possível abrir a câmera.', 'erro');
     }
   };
 </script>
