@@ -25,6 +25,12 @@
   .estoque span { display: block; font-size: 12px; color: #777; }
   .estoque b { font-size: 20px; }
   .estoque .zero b { color: #c62828; }
+  .ficha { margin-top: 16px; border-top: 1px solid #eee; padding-top: 12px; }
+  .ficha summary { font-weight: 600; cursor: pointer; color: #b37400; }
+  .ficha dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 12px 0 0; font-size: 14px; }
+  .ficha dt { color: #777; }
+  .ficha dd { margin: 0; }
+  .ficha p { font-size: 14px; margin: 10px 0 0; line-height: 1.4; }
   .item { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left;
           background: #fff; color: #222; padding: 14px; border-bottom: 1px solid #eee; border-radius: 0; }
   .item:last-child { border-bottom: 0; }
@@ -70,6 +76,26 @@
   const num = v => Number(v ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   const pega = (o, k) => o[k] ?? o[k.toUpperCase()];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const rotulo = s => { s = s.trim().toLowerCase(); return s.charAt(0).toUpperCase() + s.slice(1); };
+
+  // Monta a ficha técnica a partir do texto do DADOSTECNICOS
+  // Linhas "CAMPO: valor" viram tabela; linhas sem rótulo viram parágrafo
+  function fichaHtml(texto) {
+    const linhas = String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!linhas.length) return '';
+    const itens = [], soltos = [];
+    for (const l of linhas) {
+      const i = l.indexOf(':');
+      if (i > 0 && i <= 30) itens.push([l.slice(0, i), l.slice(i + 1).trim()]);
+      else soltos.push(l);
+    }
+    return `
+      <details class="ficha" open>
+        <summary>Ficha técnica</summary>
+        ${itens.length ? `<dl>${itens.map(([k, v]) => `<dt>${esc(rotulo(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
+        ${soltos.map(t => `<p>${esc(t)}</p>`).join('')}
+      </details>`;
+  }
 
   function mensagem(texto, classe) {
     resultado.className = 'card ' + classe;
@@ -118,6 +144,7 @@
       return `<div class="${v <= 0 ? 'zero' : ''}"><span>${nome}</span><b>${num(v)}</b></div>`;
     };
     const ref = pega(p, 'codfab');
+    const ficha = fichaHtml(pega(p, 'dadostecnicos'));
     const agora = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
     resultado.className = 'card';
     resultado.innerHTML = `
@@ -132,9 +159,10 @@
         ${est('Filial CJ', 'est_cj')}
         ${est('Filial Canaã', 'est_canaa')}
       </div>
+      ${ficha}
       <div class="aviso-legal">
         Consultado em ${agora}. Preço e estoque sujeitos a alteração sem aviso prévio.
-        Confirme com um de nossos consultores antes de finalizar a compra.
+        ${ficha ? 'Especificações conforme dados do fabricante. ' : ''}Confirme com um de nossos consultores antes de finalizar a compra.
       </div>`;
   }
 
