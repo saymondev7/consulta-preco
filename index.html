@@ -55,7 +55,7 @@
   </div>
   <button id="btnCamera">📷 Ler com a câmera</button>
   <div id="reader"></div>
-  <div id="resultado" class="card info">Bipe, digite o código ou pesquise pela descrição.</div>
+  <div id="resultado" class="card info">Bipe, digite o código ou pesquise pela descrição.<br><small>Disponível apenas dentro das lojas — permita o acesso à localização.</small></div>
 </main>
 <footer>
   As informações exibidas são apenas para consulta e podem sofrer alterações.
@@ -97,6 +97,25 @@
       </details>`;
   }
 
+  // Localização: exigida pelo n8n para liberar a consulta (só dentro das lojas)
+  // maximumAge reaproveita a última posição por 2 min para não pedir GPS a cada busca
+  function pegarLocalizacao() {
+    return new Promise((ok, falha) => {
+      if (!navigator.geolocation) { falha({ code: 0 }); return; }
+      navigator.geolocation.getCurrentPosition(
+        p => ok({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) }),
+        falha,
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 }
+      );
+    });
+  }
+
+  const erroLocalizacao = e => ({
+    1: 'Permita o acesso à localização para consultar preços. A consulta funciona apenas dentro das lojas Sol Materiais.',
+    2: 'Não foi possível obter sua localização. Ative o GPS e tente novamente.',
+    3: 'A localização demorou para responder. Tente novamente.'
+  }[e?.code] || 'Seu navegador não permite obter a localização.');
+
   function mensagem(texto, classe) {
     resultado.className = 'card ' + classe;
     resultado.textContent = texto;
@@ -105,9 +124,18 @@
   async function consultar(termo) {
     termo = String(termo).trim();
     if (termo.length < 2) { mensagem('Digite ao menos 2 caracteres.', 'erro'); return; }
+    mensagem('Verificando localização...', 'info');
+    let loc;
+    try {
+      loc = await pegarLocalizacao();
+    } catch (e) {
+      mensagem(erroLocalizacao(e), 'erro');
+      return;
+    }
     mensagem('Consultando...', 'info');
     try {
-      const r = await fetch(API + '?q=' + encodeURIComponent(termo));
+      const params = new URLSearchParams({ q: termo, lat: loc.lat, lng: loc.lng, acc: loc.acc });
+      const r = await fetch(API + '?' + params);
       let d = await r.json();
       if (!Array.isArray(d)) d = [d];
       if (!r.ok || d[0]?.erro) { mensagem(d[0]?.erro || 'Erro na consulta.', 'erro'); return; }
